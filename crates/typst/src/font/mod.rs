@@ -115,8 +115,6 @@ impl Font {
             return self.clone();
         };
 
-        println!("axes: {:?}", ttf.variation_coordinates());
-
         Self(Arc::new(Repr {
             data: self.0.data.clone(),
             index: self.0.index,
@@ -195,6 +193,9 @@ impl Hash for Font {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.data.hash(state);
         self.0.index.hash(state);
+        for coord in self.0.ttf.variation_coordinates() {
+            coord.get().hash(state);
+        }
     }
 }
 
