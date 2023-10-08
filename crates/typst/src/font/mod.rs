@@ -6,10 +6,12 @@ mod variant;
 pub use self::book::{Coverage, FontBook, FontFlags, FontInfo};
 pub use self::variant::{FontStretch, FontStyle, FontVariant, FontWeight};
 
+
 use std::fmt::{self, Debug, Formatter};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
+use rustybuzz::Tag;
 use ttf_parser::GlyphId;
 
 use self::book::find_name;
@@ -58,6 +60,71 @@ impl Font {
         let info = FontInfo::from_ttf(&ttf)?;
 
         Some(Self(Arc::new(Repr { data, index, info, metrics, ttf, rusty })))
+    }
+
+    /// Return a clone of this font with variations set. If this font is not variable,
+    /// it will return itself
+    pub fn with_variations(
+        &self,
+        variant: FontVariant,
+        variations: &[(Tag, f32)],
+    ) -> Self {
+        if !&self.0.ttf.is_variable() {
+            return self.clone();
+        }
+
+        // While these cloned object exist we will always have strong ref to the backing bytes
+        let mut ttf = self.0.ttf.clone();
+        let mut rusty = self.0.rusty.clone();
+
+        // Set options from variants first, becuase we might override them
+        // We don't care about results because we don't warn on nonexistant axes
+        ttf.set_variation(
+            ttf_parser::Tag::from_bytes(b"wght"),
+            variant.weight.to_number().into(),
+        );
+        rusty.set_variation(Tag::from_bytes(b"wght"), variant.weight.to_number().into());
+
+        ttf.set_variation(
+            ttf_parser::Tag::from_bytes(b"wdth"),
+            variant.stretch.to_ratio().get() as f32 * 100.0,
+        );
+        rusty.set_variation(
+            Tag::from_bytes(b"wdth"),
+            variant.stretch.to_ratio().get() as f32 * 100.0,
+        );
+
+        if variant.style == FontStyle::Italic {
+            ttf.set_variation(ttf_parser::Tag::from_bytes(b"ital"), 1.0);
+            rusty.set_variation(Tag::from_bytes(b"ital"), 1.0);
+        } else if variant.style == FontStyle::Oblique {
+            // We'll get clamped to the lowest supported value and the spec says -90 is the lowest
+            // allowed value, so this is the most oblique we can be in the clockwise direction
+            ttf.set_variation(ttf_parser::Tag::from_bytes(b"slnt"), -90.0);
+            rusty.set_variation(Tag::from_bytes(b"slnt"), -90.0);
+        }
+
+        for (axis, value) in variations.iter() {
+            ttf.set_variation(ttf_parser::Tag(axis.0), *value);
+            rusty.set_variation(*axis, *value);
+        }
+
+        // Get all the metrics and info after we've set axes
+        let metrics = FontMetrics::from_ttf(&ttf);
+        let Some(info) = FontInfo::from_ttf(&ttf) else {
+            return self.clone();
+        };
+
+        println!("axes: {:?}", ttf.variation_coordinates());
+
+        Self(Arc::new(Repr {
+            data: self.0.data.clone(),
+            index: self.0.index,
+            info,
+            metrics,
+            ttf,
+            rusty,
+        }))
     }
 
     /// Parse all fonts in the given data.

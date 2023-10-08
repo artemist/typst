@@ -505,6 +505,14 @@ pub struct TextElem {
     #[fold]
     pub features: FontFeatures,
 
+    /// Raw OpenType font variations to apply
+    ///
+    /// Variable fonts give substantial control over text rendering, such as
+    /// by using a specific weight (`wght`), make a font partially italic (`ital`)
+    /// or stretch a font
+    #[fold]
+    pub variations: FontVariations,
+
     /// Content in which all text is styled according to the other arguments.
     #[external]
     #[required]
@@ -894,6 +902,40 @@ cast! {
 }
 
 impl Fold for FontFeatures {
+    type Output = Self;
+
+    fn fold(mut self, outer: Self::Output) -> Self::Output {
+        self.0.extend(outer.0);
+        self
+    }
+}
+
+/// OpenType font variation settings
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct FontVariations(pub Vec<(Tag, f32)>);
+
+cast! {
+    FontVariations,
+    self => self.0
+        .into_iter()
+        .map(|(tag, num)| {
+            let bytes = tag.to_bytes();
+            let key = std::str::from_utf8(&bytes).unwrap_or_default();
+            (key.into(), (num as f64).into_value())
+        })
+        .collect::<Dict>()
+        .into_value(),
+    values: Dict => Self(values
+        .into_iter()
+        .map(|(k, v)| {
+            let num = v.cast::<f64>()? as f32;
+            let tag = Tag::from_bytes_lossy(k.as_bytes());
+            Ok((tag, num))
+        })
+        .collect::<StrResult<_>>()?),
+}
+
+impl Fold for FontVariations {
     type Output = Self;
 
     fn fold(mut self, outer: Self::Output) -> Self::Output {

@@ -32,6 +32,8 @@ pub struct ShapedText<'a> {
     pub styles: StyleChain<'a>,
     /// The font variant.
     pub variant: FontVariant,
+    /// The font's OpenType variations
+    pub variations: Cow<'a, [(Tag, f32)]>,
     /// The font size.
     pub size: Abs,
     /// The width of the text's bounding box.
@@ -411,6 +413,7 @@ impl<'a> ShapedText<'a> {
                 styles: self.styles,
                 size: self.size,
                 variant: self.variant,
+                variations: Cow::Borrowed(&self.variations),
                 width: glyphs.iter().map(|g| g.x_advance).sum::<Em>().at(self.size),
                 glyphs: Cow::Borrowed(glyphs),
             }
@@ -539,6 +542,7 @@ struct ShapingContext<'a, 'v> {
     size: Abs,
     variant: FontVariant,
     tags: Vec<rustybuzz::Feature>,
+    variations: Vec<(Tag, f32)>,
     fallback: bool,
     dir: Dir,
 }
@@ -565,6 +569,7 @@ pub fn shape<'a>(
         styles,
         variant: variant(styles),
         tags: tags(styles),
+        variations: variations(styles),
         fallback: TextElem::fallback_in(styles),
         dir,
     };
@@ -589,6 +594,7 @@ pub fn shape<'a>(
         region,
         styles,
         variant: ctx.variant,
+        variations: Cow::Owned(ctx.variations.clone()),
         size,
         width: ctx.glyphs.iter().map(|g| g.x_advance).sum::<Em>().at(size),
         glyphs: Cow::Owned(ctx.glyphs),
@@ -626,14 +632,16 @@ fn shape_segment(
     }
 
     // Extract the font id or shape notdef glyphs if we couldn't find any font.
-    let Some(font) = selection else {
+    let Some(base_font) = selection else {
         if let Some(font) = ctx.used.first().cloned() {
             shape_tofus(ctx, base, text, font);
         }
         return;
     };
 
-    ctx.used.push(font.clone());
+    ctx.used.push(base_font.clone());
+
+    let font = base_font.with_variations(ctx.variant, &ctx.variations);
 
     // Fill the buffer with our text.
     let mut buffer = UnicodeBuffer::new();
@@ -936,6 +944,11 @@ pub fn tags(styles: StyleChain) -> Vec<Feature> {
     }
 
     tags
+}
+
+/// Extract OpenType variations from styles
+fn variations(styles: StyleChain) -> Vec<(Tag, f32)> {
+    TextElem::variations_in(styles).0
 }
 
 /// Process the language and and region of a style chain into a
